@@ -1,0 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-base text-text-primary font-sans text-base;
+  margin: 0;
+  /* App is dark-themed only — without this, native form controls (the
+     datetime-local calendar/clock picker icon, scrollbars, etc.) render in
+     light-mode colors and are nearly invisible against dark input fields. */
+  color-scheme: dark;
+}

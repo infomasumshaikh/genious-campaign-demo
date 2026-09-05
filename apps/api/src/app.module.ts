@@ -1,0 +1,96 @@
+import { Module } from '@nestjs/common';
+import { AppController } from './app.controller';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { envValidationSchema } from './config/env.validation';
+import { DbModule } from './db/db.module';
+import { HealthModule } from './health/health.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { ListsModule } from './lists/lists.module';
+import { TagsModule } from './tags/tags.module';
+import { TemplatesModule } from './templates/templates.module';
+import { SequencesModule } from './sequences/sequences.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { VerificationModule } from './verification/verification.module';
+import { AuthModule } from './auth/auth.module';
+import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { SendingModule } from './sending/sending.module';
+import { SuppressionModule } from './suppression/suppression.module';
+import { TrackingModule } from './tracking/tracking.module';
+import { SequenceRunnerModule } from './sequence-runner/sequence-runner.module';
+import { OutboundWebhooksModule } from './outbound-webhooks/outbound-webhooks.module';
+import { TriggersModule } from './triggers/triggers.module';
+import { EventsModule } from './events/events.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { CircuitBreakerModule } from './circuit-breaker/circuit-breaker.module';
+import { SlackModule } from './slack/slack.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { EmailLogModule } from './email-log/email-log.module';
+import { AiAssistModule } from './ai-assist/ai-assist.module';
+import { PasswordResetModule } from './password-reset/password-reset.module';
+import { SettingsModule } from './settings/settings.module';
+import { DebugLogModule } from './debug-log/debug-log.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { PublicApiModule } from './public-api/public-api.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['../../.env', '.env'],
+      validationSchema: envValidationSchema,
+    }),
+    EventEmitterModule.forRoot(),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const url = config.get<string>('REDIS_URL')!;
+        return {
+          // ioredis turns on default (fully-verifying) TLS for rediss:// on
+          // its own, but unlike `pg` it never reads a query-string toggle to
+          // relax that — so a managed Redis on a self-signed cert needs this
+          // passed explicitly, the same "encrypt but don't verify the CA"
+          // trade-off as DATABASE_URL's sslmode=no-verify.
+          connection: {
+            url,
+            ...(url.startsWith('rediss://') ? { tls: { rejectUnauthorized: false } } : {}),
+          },
+        };
+      },
+    }),
+    DbModule,
+    HealthModule,
+    ContactsModule,
+    ListsModule,
+    TagsModule,
+    TemplatesModule,
+    SequencesModule,
+    WebhooksModule,
+    VerificationModule,
+    AuthModule,
+    EnrollmentsModule,
+    SendingModule,
+    SuppressionModule,
+    TrackingModule,
+    SequenceRunnerModule,
+    OutboundWebhooksModule,
+    TriggersModule,
+    EventsModule,
+    CampaignsModule,
+    UploadsModule,
+    CircuitBreakerModule,
+    SlackModule,
+    AnalyticsModule,
+    EmailLogModule,
+    AiAssistModule,
+    PasswordResetModule,
+    SettingsModule,
+    DebugLogModule,
+    ApiKeysModule,
+    PublicApiModule,
+  ],
+  controllers: [AppController],
+})
+export class AppModule {}

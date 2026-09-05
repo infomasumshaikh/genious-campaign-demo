@@ -1,0 +1,116 @@
+import { pgTable, pgEnum, uuid, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { contacts } from './contacts';
+import { templates } from './templates';
+import { sequences, sequenceSteps } from './sequences';
+import { sequenceEnrollments } from './enrollments';
+import { senderAccounts } from './sender-accounts';
+
+export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'sending', 'sent', 'failed']);
+// GC-070 — a campaign targets exactly one of these; which id column(s) are
+// populated depends on this value (enforced in CampaignsService.create(),
+// not a DB constraint, same as other "one of several optional FKs" shapes
+// already in this schema e.g. sends' sequence/campaign columns).
+export const campaignAudienceTypeEnum = pgEnum('campaign_audience_type', ['list', 'tags', 'contacts']);
+
+export const campaigns = pgTable('campaigns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  templateId: uuid('template_id')
+    .notNull()
+    .references(() => templates.id, { onDelete: 'restrict' }),
+  audienceType: campaignAudienceTypeEnum('audience_type').notNull().default('list'),
+  // Only one of listIds/tagIds/contactIds is ever set, matching audienceType.
+  // GC-112 — listIds is an array (was a single listId) so "list" audience
+  // can target several lists at once (union). excludeListIds applies
+  // independent of audienceType — contacts in any excluded list are removed
+  // from the resolved recipient set regardless of how it was built.
+  listIds: uuid('list_ids').array(),
+  excludeListIds: uuid('exclude_list_ids').array(),
+  tagIds: uuid('tag_ids').array(),
+  contactIds: uuid('contact_ids').array(),
+  status: campaignStatusEnum('status').notNull().default('draft'),
+  sentCount: integer('sent_count').notNull().default(0),
+  failedCount: integer('failed_count').notNull().default(0),
+  suppressedCount: integer('suppressed_count').notNull().default(0),
+  isDryRun: boolean('is_dry_run').notNull().default(false),
+  // When set, every recipient's resolved email is sent to this address
+  // instead of their real one (GC-052 send-to-self) — a real send (quota
+  // still consumed), just redirected, distinct from isDryRun which never
+  // sends at all.
+  sendToEmail: text('send_to_email'),
+  // GC-053 — a send above the configurable large-send threshold requires
+  // this to be explicitly set before CampaignsService.send() will enqueue it.
+  largeSendConfirmed: boolean('large_send_confirmed').notNull().default(false),
+  // GC-113 — set when send() is called with a future scheduledAt instead of
+  // sending immediately. status stays 'draft' the whole time it's waiting
+  // (the BullMQ delayed job re-checks status==='draft' at fire time, same
+  // invariant 3 pattern as an immediate send) — scheduledAt is what the UI
+  // uses to tell "not yet sent" apart from "scheduled, waiting to fire".
+  // Cleared by CampaignsService.cancelSchedule() when a schedule is cancelled.
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  // GC-125 — null keeps the existing quota-based auto-pick (invariant 7);
+  // when set, this is a hard override checked at send time
+  // (SenderAccountService.pickAccountForSend()) and the send fails outright
+  // if that account is inactive/exhausted rather than silently falling back
+  // — a picked-but-unusable sender should never surprise the caller with a
+  // different From address than what they configured.
+  senderAccountId: uuid('sender_account_id').references(() => senderAccounts.id, { onDelete: 'set null' }),
+  // Per-campaign From display name override — falls back to the picked
+  // sender account's own displayName when unset.
+  fromName: text('from_name'),
+  replyTo: text('reply_to'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const sendProviderEnum = pgEnum('send_provider', ['ses', 'gmail']);
+export const sendStatusEnum = pgEnum('send_status', ['sent', 'failed', 'suppressed', 'bounced', 'complained']);
+
+export const sends = pgTable(
+  'sends',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+    templateId: uuid('template_id').references(() => templates.id, { onDelete: 'set null' }),
+    campaignId: uuid('campaign_id').references(() => campaigns.id, { onDelete: 'set null' }),
+    sequenceEnrollmentId: uuid('sequence_enrollment_id').references(() => sequenceEnrollments.id, {
+      onDelete: 'set null',
+    }),
+    sequenceId: uuid('sequence_id').references(() => sequences.id, { onDelete: 'set null' }),
+    sequenceStepId: uuid('sequence_step_id').references(() => sequenceSteps.id, { onDelete: 'set null' }),
+    provider: sendProviderEnum('provider').notNull().default('ses'),
+    providerMessageId: text('provider_message_id'),
+    resolvedSubject: text('resolved_subject').notNull(),
+    resolvedBodyHtml: text('resolved_body_html').notNull(),
+    resolvedBodyText: text('resolved_body_text').notNull(),
+    status: sendStatusEnum('status').notNull(),
+    error: text('error'),
+    isDryRun: boolean('is_dry_run').notNull().default(false),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // FK constraints don't implicitly create an index in Postgres — without
+  // this, every per-contact "last activity" lookup (contacts list, contact
+  // detail) was a full table scan of `sends`. Found while diagnosing slow
+  // contacts-page loads at 7k+ contacts (GC-118).
+  (table) => [index('sends_contact_id_idx').on(table.contactId)],
+);
+
+export const emailEventTypeEnum = pgEnum('email_event_type', ['open', 'click', 'bounce', 'complaint']);
+
+export const emailEvents = pgTable(
+  'email_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sendId: uuid('send_id')
+      .notNull()
+      .references(() => sends.id, { onDelete: 'cascade' }),
+    type: emailEventTypeEnum('type').notNull(),
+    url: text('url'),
+    metadata: text('metadata'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('email_events_send_id_idx').on(table.sendId)],
+);

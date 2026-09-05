@@ -1,0 +1,96 @@
+import { apiGet, apiPatch, apiPost } from './api';
+
+export type CampaignStatus = 'draft' | 'sending' | 'sent' | 'failed';
+export type SendStatus = 'sent' | 'failed' | 'suppressed' | 'bounced' | 'complained';
+
+export type CampaignAudienceType = 'list' | 'tags' | 'contacts';
+
+export interface Campaign {
+  id: string;
+  name: string;
+  templateId: string;
+  audienceType: CampaignAudienceType;
+  listIds: string[] | null;
+  excludeListIds: string[] | null;
+  tagIds: string[] | null;
+  contactIds: string[] | null;
+  status: CampaignStatus;
+  sentCount: number;
+  failedCount: number;
+  suppressedCount: number;
+  isDryRun: boolean;
+  sendToEmail: string | null;
+  scheduledAt: string | null;
+  senderAccountId: string | null;
+  fromName: string | null;
+  replyTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // Present on list responses only (GET /campaigns) — computed server-side.
+  openCount?: number;
+  clickCount?: number;
+}
+
+export interface CampaignSend {
+  id: string;
+  contactId: string;
+  status: SendStatus;
+  provider: 'ses' | 'gmail';
+  error: string | null;
+  isDryRun: boolean;
+  sentAt: string | null;
+  createdAt: string;
+  opened: boolean;
+  clicked: boolean;
+}
+
+export interface SendCampaignResult {
+  id: string;
+  status: 'queued' | 'scheduled' | 'confirmation_required';
+  recipientCount?: number;
+  threshold?: number;
+  scheduledAt?: string;
+}
+
+export function listCampaigns() {
+  return apiGet<Campaign[]>('/campaigns');
+}
+
+export function getCampaign(id: string) {
+  return apiGet<Campaign>(`/campaigns/${id}`);
+}
+
+export function getCampaignSends(id: string) {
+  return apiGet<CampaignSend[]>(`/campaigns/${id}/sends`);
+}
+
+export interface CampaignInput {
+  name: string;
+  templateId: string;
+  audienceType?: CampaignAudienceType;
+  listIds?: string[];
+  excludeListIds?: string[];
+  tagIds?: string[];
+  contactIds?: string[];
+  isDryRun?: boolean;
+  sendToEmail?: string;
+  senderAccountId?: string;
+  fromName?: string;
+  replyTo?: string;
+}
+
+export function createCampaign(input: CampaignInput) {
+  return apiPost<Campaign>('/campaigns', input);
+}
+
+export function updateCampaign(id: string, input: Partial<CampaignInput>) {
+  return apiPatch<Campaign>(`/campaigns/${id}`, input);
+}
+
+export function sendCampaign(id: string, confirmed?: boolean, scheduledAt?: string) {
+  return apiPost<SendCampaignResult>(`/campaigns/${id}/send`, { confirmed, scheduledAt });
+}
+
+export function cancelCampaignSchedule(id: string) {
+  return apiPost<{ id: string; status: CampaignStatus }>(`/campaigns/${id}/cancel-schedule`, {});
+}
